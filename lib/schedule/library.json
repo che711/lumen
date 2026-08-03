@@ -1,0 +1,6 @@
+{
+  "name": "schedule",
+  "version": "0.1.0",
+  "description": "Декларативное ядро планировщика Lumen: не зависит от Arduino, тестируется на хосте",
+  "build": { "flags": ["-std=c++17"] }
+}

@@ -1,0 +1,7 @@
+.pio/
+.vscode/
+build/
+*.bin
+*.elf
+node_modules/
+data/www/
