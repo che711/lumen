@@ -5,3 +5,6 @@ build/
 *.elf
 node_modules/
 data/www/
+
+# Содержит пароль от Wi-Fi — в репозиторий не попадает.
+data/config.json
