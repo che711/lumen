@@ -1,0 +1,50 @@
+// store.h — хранение конфигурации и расписания на LittleFS.
+//
+// Всё лежит человекочитаемым JSON: конфиг можно вытащить, отредактировать
+// и залить обратно, не собирая прошивку.
+#pragma once
+
+#include <Arduino.h>
+
+#include <vector>
+
+#include "config.h"
+#include "schedule.h"
+
+namespace lumen {
+
+struct DeviceConfig {
+    String  name = "Lumen";
+
+    String  wifiSsid;
+    String  wifiPass;
+
+    uint16_t ledCount = 60;
+    uint8_t  ledPin   = LED_PIN;
+
+    // Нужны для солнечных якорей расписания.
+    double  latitude  = 52.2297;   // Варшава по умолчанию
+    double  longitude = 21.0122;
+    String  timezone  = "CET-1CEST,M3.5.0,M10.5.0/3";  // POSIX TZ, Польша
+
+    uint8_t bootBrightness = 128;
+};
+
+bool storeBegin();
+
+DeviceConfig& config();
+bool loadConfig();
+bool saveConfig();
+void requestConfigSave();          // с дебаунсом, вызывать из обработчиков
+void storeTick(uint32_t nowMs);    // выполняет отложенную запись
+
+std::vector<Rule>& scheduleRules();
+bool loadSchedule();
+bool saveSchedule();
+
+// Сериализация расписания в JSON и обратно — используется и хранилищем,
+// и HTTP API, поэтому вынесена сюда.
+String scheduleToJson();
+bool scheduleFromJson(const String& json, String& errorOut);
+
+}  // namespace lumen

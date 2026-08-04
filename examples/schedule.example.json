@@ -1,0 +1,41 @@
+{
+  "rules": [
+    {
+      "id": 1,
+      "enabled": true,
+      "priority": 0,
+      "from": { "type": "sunset", "value": -30 },
+      "to": { "type": "clock", "value": 1410 },
+      "days": 127,
+      "action": { "preset": -1, "bri": 180, "powerOff": false },
+      "fadeIn": 1800,
+      "fadeOut": 900,
+      "_комментарий": "Вечерний свет: включается за 30 мин до заката, гаснет к 23:30. Разгон 30 мин, угасание 15 мин."
+    },
+    {
+      "id": 2,
+      "enabled": true,
+      "priority": 10,
+      "from": { "type": "clock", "value": 1200 },
+      "to": { "type": "clock", "value": 1320 },
+      "days": 64,
+      "except": ["2026-12-25", "2026-12-31"],
+      "action": { "preset": 3, "bri": 255, "powerOff": false },
+      "fadeIn": 60,
+      "fadeOut": 60,
+      "_комментарий": "Суббота 20:00–22:00: яркий пресет, перебивает вечерний по приоритету. Не работает в праздники."
+    },
+    {
+      "id": 3,
+      "enabled": true,
+      "priority": 20,
+      "from": { "type": "clock", "value": 1410 },
+      "to": { "type": "sunrise", "value": 0 },
+      "days": 127,
+      "action": { "preset": -1, "bri": 12, "powerOff": false },
+      "fadeIn": 600,
+      "fadeOut": 1200,
+      "_комментарий": "Ночной режим: тусклая подсветка с 23:30 до восхода. Окно переходит через полночь — резолвер это понимает."
+    }
+  ]
+}

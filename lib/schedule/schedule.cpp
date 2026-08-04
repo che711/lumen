@@ -147,4 +147,3 @@ Resolved resolve(const Now& now,
 }
 
 }  // namespace lumen
-
