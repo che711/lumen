@@ -23,12 +23,41 @@ const PaletteStop kForest[] = {{0, 0, 40, 10}, {90, 20, 110, 20},
 const PaletteStop kLava[]   = {{0, 20, 0, 0}, {90, 160, 20, 0},
                                {180, 255, 110, 0}, {255, 255, 230, 120}};
 
+// Градиенты ниже написаны с нуля. Из WLED ничего не копируется: он под
+// EUPL-1.2, и заимствование потребовало бы сменить лицензию всего проекта.
+const PaletteStop kCloud[]  = {{0, 0, 0, 80}, {60, 0, 60, 160},
+                               {130, 120, 160, 220}, {200, 220, 235, 255},
+                               {255, 255, 255, 255}};
+const PaletteStop kHeat[]   = {{0, 0, 0, 0}, {64, 140, 0, 0},
+                               {128, 220, 60, 0}, {190, 255, 190, 0},
+                               {255, 255, 255, 220}};
+const PaletteStop kSunset[] = {{0, 60, 10, 60}, {70, 200, 50, 60},
+                               {140, 255, 120, 40}, {200, 255, 190, 90},
+                               {255, 255, 235, 180}};
+const PaletteStop kAurora[] = {{0, 0, 20, 40}, {70, 0, 140, 110},
+                               {140, 40, 220, 150}, {200, 120, 90, 220},
+                               {255, 20, 20, 90}};
+const PaletteStop kIce[]    = {{0, 0, 10, 60}, {80, 0, 90, 180},
+                               {160, 120, 200, 240}, {255, 255, 255, 255}};
+const PaletteStop kCandle[] = {{0, 60, 10, 0}, {90, 180, 60, 0},
+                               {170, 255, 140, 30}, {255, 255, 200, 120}};
+const PaletteStop kAutumn[] = {{0, 60, 15, 0}, {80, 170, 60, 0},
+                               {160, 220, 140, 20}, {220, 200, 90, 10},
+                               {255, 120, 30, 0}};
+const PaletteStop kSakura[] = {{0, 120, 20, 60}, {80, 255, 120, 180},
+                               {160, 255, 190, 215}, {255, 255, 240, 245}};
+const PaletteStop kNeon[]   = {{0, 0, 255, 200}, {85, 80, 0, 255},
+                               {170, 255, 0, 150}, {255, 0, 255, 200}};
+const PaletteStop kDeep[]   = {{0, 0, 0, 30}, {90, 0, 40, 110},
+                               {170, 0, 120, 150}, {255, 80, 220, 200}};
+
 struct PaletteDef {
     const char*        name;
     const PaletteStop* stops;
     uint8_t            count;
 };
 
+// ВНИМАНИЕ: порядок = индекс pal в API. Только добавлять в конец.
 const PaletteDef kPalettes[] = {
     {"Default", nullptr, 0},          // берёт primary сегмента
     {"Rainbow", nullptr, 0},          // спецслучай: HSV по кругу
@@ -36,6 +65,16 @@ const PaletteDef kPalettes[] = {
     {"Ocean", kOcean, 4},
     {"Forest", kForest, 4},
     {"Lava", kLava, 4},
+    {"Cloud", kCloud, 5},
+    {"Heat", kHeat, 5},
+    {"Sunset", kSunset, 5},
+    {"Aurora", kAurora, 5},
+    {"Ice", kIce, 4},
+    {"Candle", kCandle, 4},
+    {"Autumn", kAutumn, 5},
+    {"Sakura", kSakura, 4},
+    {"Neon", kNeon, 4},
+    {"Deep", kDeep, 4},
 };
 
 constexpr uint8_t kPaletteCount = sizeof(kPalettes) / sizeof(kPalettes[0]);
@@ -306,6 +345,21 @@ uint8_t paletteCount() { return kPaletteCount; }
 
 const char* paletteName(uint8_t index) {
     return index < kPaletteCount ? kPalettes[index].name : "Default";
+}
+
+// Опорные точки наружу — чтобы интерфейс рисовал превью по данным прошивки,
+// а не по своей копии палитр. Копия рано или поздно разъезжается с оригиналом.
+uint8_t paletteStopCount(uint8_t palette) {
+    return palette < kPaletteCount ? kPalettes[palette].count : 0;
+}
+
+PaletteStopInfo paletteStopAt(uint8_t palette, uint8_t index) {
+    if (palette >= kPaletteCount || index >= kPalettes[palette].count ||
+        kPalettes[palette].stops == nullptr) {
+        return PaletteStopInfo{0, 0, 0, 0};
+    }
+    const PaletteStop& s = kPalettes[palette].stops[index];
+    return PaletteStopInfo{s.pos, s.r, s.g, s.b};
 }
 
 Rgb paletteColor(uint8_t palette, uint8_t pos, const Rgb& primary) {

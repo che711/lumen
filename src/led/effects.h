@@ -34,6 +34,16 @@ void renderEffect(uint8_t index, EffectContext& ctx);
 uint8_t paletteCount();
 const char* paletteName(uint8_t index);
 
+// Опорная точка градиента: позиция 0..255 и цвет в ней.
+struct PaletteStopInfo {
+    uint8_t pos, r, g, b;
+};
+
+// Палитры «Default» и «Rainbow» опорных точек не имеют — у них count == 0.
+// Первая берёт цвет сегмента, вторая считается по кругу HSV.
+uint8_t paletteStopCount(uint8_t palette);
+PaletteStopInfo paletteStopAt(uint8_t palette, uint8_t index);
+
 // Цвет из палитры по позиции 0..255. Палитра 0 («Default») возвращает
 // primary — так «сплошной цвет» работает без спецслучаев в каждом эффекте.
 Rgb paletteColor(uint8_t palette, uint8_t pos, const Rgb& primary);

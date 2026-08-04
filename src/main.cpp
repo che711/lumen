@@ -44,7 +44,10 @@ void setup() {
     const uint16_t ledCount = lumen::config().ledCount;
     lumen::stateInit(ledCount);
 
-    {
+    // bootBrightness — значение для самого первого запуска. Если сохранённое
+    // состояние есть, оно важнее: перезагрузка не должна сбрасывать свет к
+    // заводским настройкам.
+    if (!lumen::loadState()) {
         lumen::StateLock st;
         st->brightness = lumen::config().bootBrightness;
     }

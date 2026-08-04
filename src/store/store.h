@@ -36,7 +36,20 @@ DeviceConfig& config();
 bool loadConfig();
 bool saveConfig();
 void requestConfigSave();          // с дебаунсом, вызывать из обработчиков
-void storeTick(uint32_t nowMs);    // выполняет отложенную запись
+void storeTick(uint32_t nowMs);    // выполняет отложенные записи
+
+// Состояние ленты: яркость, питание, сегменты. Хранится отдельно от конфига
+// устройства, потому что меняется на каждое движение слайдера.
+// Огибающая планировщика не сохраняется — она производная, её пересчитает
+// резолвер на первом же тике после загрузки.
+bool loadState();
+bool saveState();
+void requestStateSave();           // с дебаунсом, вызывать из обработчиков
+
+// Сериализация состояния — как и у расписания, используется и хранилищем,
+// и эндпоинтом бэкапа, поэтому живёт здесь.
+String stateStoreToJson();
+bool stateStoreFromJson(const String& json, String& errorOut);
 
 std::vector<Rule>& scheduleRules();
 bool loadSchedule();

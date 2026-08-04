@@ -2,7 +2,7 @@
 //
 // Отдельный буфер кадра (не пишем в NeoPixelBus напрямую) нужен, чтобы
 // поверх результата эффекта накладывать глобальную яркость и огибающую
-// планировщика, а также плавно переходить между кадрами при смене пресета.
+// планировщика, а уже потом — гамму с дизерингом.
 #pragma once
 
 #include <Arduino.h>
@@ -33,10 +33,9 @@ class LedController {
 
     uint16_t ledCount_ = 0;
     Rgb*     frame_    = nullptr;   // результат эффектов, до яркости
-    Rgb*     shown_    = nullptr;   // то, что реально ушло на ленту
     void*    strip_    = nullptr;   // NeoPixelBus, спрятан за void* ради заголовка
 
-    uint32_t lastShowMs_ = 0;
+    uint32_t frameSeq_ = 0;         // монотонный счётчик кадров — фаза дизеринга
     uint32_t frameCount_ = 0;
     uint32_t fpsWindowMs_ = 0;
     uint16_t fps_ = 0;

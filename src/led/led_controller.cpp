@@ -24,17 +24,38 @@ inline uint8_t scale8(uint8_t value, uint8_t factor) {
 
 // Гамма-коррекция: линейный ШИМ выглядит для глаза резким на низкой яркости,
 // а диммирование по расписанию живёт именно там.
-uint8_t gamma8(uint8_t v) {
-    static uint8_t table[256];
+//
+// Таблица намеренно 16-битная. В восьми битах gamma(v) обращается в ноль при
+// v < 18 — то есть нижние 7% шкалы были бы сплошной чернотой, и получасовой
+// fadeIn первые минуты не показывал бы ничего. Дробную часть забирает
+// дизеринг ниже.
+uint16_t gamma16(uint8_t v) {
+    static uint16_t table[256];
     static bool ready = false;
     if (!ready) {
         for (int i = 0; i < 256; ++i) {
-            table[i] = static_cast<uint8_t>(
-                powf(i / 255.0f, 2.2f) * 255.0f + 0.5f);
+            table[i] = static_cast<uint16_t>(
+                powf(i / 255.0f, 2.2f) * 65535.0f + 0.5f);
         }
         ready = true;
     }
     return table[v];
+}
+
+// Упорядоченный дизеринг по кадрам и по позиции: уровень тоньше одной ступени
+// ШИМ превращается в мерцание, которое глаз усредняет. Порог гуляет и во
+// времени, и вдоль ленты — иначе на однотонной заливке проступают полосы.
+inline uint8_t ditherThreshold(uint16_t index, uint32_t frame) {
+    static const uint8_t kBayer[4] = {0, 128, 64, 192};
+    return kBayer[(index + frame) & 3];
+}
+
+// Сводит 16-битное значение к восьми битам, отдавая остаток дизерингу.
+inline uint8_t quantize(uint16_t value, uint16_t index, uint32_t frame) {
+    const uint8_t high = static_cast<uint8_t>(value >> 8);
+    if (high == 255) return 255;
+    const uint8_t frac = static_cast<uint8_t>(value & 0xFF);
+    return frac > ditherThreshold(index, frame) ? high + 1 : high;
 }
 
 }  // namespace
@@ -44,9 +65,8 @@ bool LedController::begin(uint16_t ledCount, uint8_t pin) {
     ledCount_ = ledCount;
 
     frame_ = new (std::nothrow) Rgb[ledCount_]();
-    shown_ = new (std::nothrow) Rgb[ledCount_]();
-    if (!frame_ || !shown_) {
-        log_e("Не хватило памяти на буферы кадра для %u диодов", ledCount_);
+    if (!frame_) {
+        log_e("Не хватило памяти на буфер кадра для %u диодов", ledCount_);
         return false;
     }
 
@@ -113,6 +133,10 @@ void LedController::render(const AppState& state, uint32_t nowMs) {
 
     applyAndShow(state.effectiveBrightness());
 
+    // Монотонный счётчик кадров — фаза дизеринга. Отдельно от frameCount_,
+    // который обнуляется каждую секунду ради подсчёта FPS.
+    frameSeq_++;
+
     // Счётчик FPS — попадает в /json/info, полезен для диагностики.
     frameCount_++;
     if (nowMs - fpsWindowMs_ >= 1000) {
@@ -128,11 +152,13 @@ void LedController::applyAndShow(uint8_t globalBrightness) {
 
     for (uint16_t i = 0; i < ledCount_; ++i) {
         const Rgb& c = frame_[i];
-        const Rgb out{gamma8(scale8(c.r, globalBrightness)),
-                      gamma8(scale8(c.g, globalBrightness)),
-                      gamma8(scale8(c.b, globalBrightness))};
-        shown_[i] = out;
-        strip->SetPixelColor(i, RgbColor(out.r, out.g, out.b));
+        // Яркость применяется до гаммы — так слайдер получается перцептивно
+        // линейным. Точность нижней части шкалы вытягивает 16-битная таблица
+        // с дизерингом на выходе.
+        const uint8_t r = quantize(gamma16(scale8(c.r, globalBrightness)), i, frameSeq_);
+        const uint8_t g = quantize(gamma16(scale8(c.g, globalBrightness)), i, frameSeq_);
+        const uint8_t b = quantize(gamma16(scale8(c.b, globalBrightness)), i, frameSeq_);
+        strip->SetPixelColor(i, RgbColor(r, g, b));
     }
     strip->Show();
 }
