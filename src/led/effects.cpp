@@ -118,6 +118,29 @@ inline uint32_t scaledTime(uint32_t timeMs, uint8_t speed) {
     return static_cast<uint32_t>(timeMs * (1 + speed / 16));
 }
 
+// Целочисленный синус: вход 0..255 — полный период, выход 0..255.
+// У ESP32-C3 нет FPU, и sinf в пиксельном цикле съедает бюджет кадра.
+//
+// Таблица — не состояние эффекта: после инициализации она константна и от
+// истории кадров не зависит. Чистоту эффектов это не нарушает.
+uint8_t sin8(uint8_t theta) {
+    static uint8_t table[256];
+    static bool ready = false;
+    if (!ready) {
+        for (int i = 0; i < 256; ++i) {
+            const float a = sinf(i * 2.0f * PI / 256.0f);
+            table[i] = static_cast<uint8_t>((a * 0.5f + 0.5f) * 255.0f + 0.5f);
+        }
+        ready = true;
+    }
+    return table[theta];
+}
+
+// Линейная интерполяция между двумя байтами, f — доля 0..255.
+inline uint8_t lerp8(uint8_t a, uint8_t b, uint8_t f) {
+    return static_cast<uint8_t>((a * (255 - f) + b * f) / 255);
+}
+
 // ------------------------------------------------------------- эффекты
 
 void fxSolid(EffectContext& ctx) {
@@ -221,8 +244,10 @@ void fxComet(EffectContext& ctx) {
 
     for (uint16_t i = 0; i < ctx.length; ++i) {
         const uint16_t behind = (head + ctx.length - i) % ctx.length;
-        float level = 1.0f;
-        for (uint16_t k = 0; k < behind && level > 0.004f; ++k) level *= decay;
+        // powf вместо цикла умножений: при intensity 255 затухание равно 0.97,
+        // и цикл делал до 180 итераций на каждый пиксель. На C3, где нет FPU,
+        // это укладывало кадр.
+        const float level = powf(decay, static_cast<float>(behind));
         const uint8_t pos = static_cast<uint8_t>(i * 255 / ctx.length);
         const Rgb base = paletteColor(ctx.palette, pos, ctx.primary);
         ctx.buffer[i] = scale(base, static_cast<uint8_t>(level * 255.0f));
@@ -302,6 +327,165 @@ void fxColorloop(EffectContext& ctx) {
     for (uint16_t i = 0; i < ctx.length; ++i) ctx.buffer[i] = color;
 }
 
+// Плазма: сумма двух бегущих синусов разной частоты. Классический узор,
+// который не повторяется на глаз, оставаясь чистой функцией времени.
+void fxPlasma(EffectContext& ctx) {
+    const uint32_t t = scaledTime(ctx.timeMs, ctx.speed) / 24;
+    const uint8_t scale = 1 + (ctx.intensity >> 4);
+
+    for (uint16_t i = 0; i < ctx.length; ++i) {
+        const uint8_t a = sin8(static_cast<uint8_t>(i * scale + t));
+        const uint8_t b = sin8(static_cast<uint8_t>(i * (scale / 2 + 1) - t * 2));
+        const uint8_t v = static_cast<uint8_t>((a + b) / 2);
+        ctx.buffer[i] = paletteColor(ctx.palette, v, ctx.primary);
+    }
+}
+
+// Шум: интерполяция хеша по двум осям сразу — между соседними ячейками
+// вдоль ленты и между двумя поколениями во времени. Отсюда плавное
+// «перетекание» без хранения предыдущего кадра.
+void fxNoise(EffectContext& ctx) {
+    const uint32_t period = 200 - ctx.speed / 2;   // 200..73 мс на поколение
+    const uint32_t gen = ctx.timeMs / period;
+    const uint8_t  mix = static_cast<uint8_t>((ctx.timeMs % period) * 255 / period);
+    const uint16_t zoom = 1 + (ctx.intensity >> 5);  // ширина ячейки в диодах
+
+    for (uint16_t i = 0; i < ctx.length; ++i) {
+        const uint16_t cell = i / zoom;
+        const uint8_t  f = static_cast<uint8_t>((i % zoom) * 255 / zoom);
+
+        const uint8_t a = lerp8(hashNoise(cell, gen), hashNoise(cell + 1, gen), f);
+        const uint8_t b = lerp8(hashNoise(cell, gen + 1),
+                                hashNoise(cell + 1, gen + 1), f);
+        ctx.buffer[i] = paletteColor(ctx.palette, lerp8(a, b, mix), ctx.primary);
+    }
+}
+
+// Метеор: голова с линейным хвостом, часть пикселей которого гаснет —
+// след рассыпается. «Случайность» привязана к позиции головы, поэтому
+// картинка воспроизводима для любого t.
+void fxMeteor(EffectContext& ctx) {
+    const uint32_t t = scaledTime(ctx.timeMs, ctx.speed) / 45;
+    const uint16_t head = t % ctx.length;
+    const uint16_t tail = 2 + (ctx.length * ctx.intensity) / 512;
+
+    for (uint16_t i = 0; i < ctx.length; ++i) {
+        const uint16_t behind = (head + ctx.length - i) % ctx.length;
+        uint8_t level = behind < tail
+                            ? static_cast<uint8_t>(255 - behind * 255 / tail)
+                            : 0;
+        if (level && hashNoise(i, t / 3) < 60) level /= 3;
+
+        const uint8_t pos = static_cast<uint8_t>(i * 255 / ctx.length);
+        ctx.buffer[i] = level
+                            ? scale(paletteColor(ctx.palette, pos, ctx.primary), level)
+                            : ctx.secondary;
+    }
+}
+
+// Круги на воде: из случайной точки расходятся два фронта, угасая.
+// Одновременных кругов от одного до четырёх — по intensity.
+void fxRipple(EffectContext& ctx) {
+    const uint32_t period = 3000 - ctx.speed * 10;   // 3000..450
+    const uint8_t  rings = 1 + (ctx.intensity >> 6);
+
+    for (uint16_t i = 0; i < ctx.length; ++i) ctx.buffer[i] = ctx.secondary;
+
+    for (uint8_t k = 0; k < rings; ++k) {
+        // Разносим круги по фазе, чтобы они не вспыхивали разом.
+        const uint32_t shifted = ctx.timeMs + k * (period / rings);
+        const uint32_t gen     = shifted / period;
+        const uint32_t within  = shifted % period;
+
+        const uint16_t origin = hashNoise(k, gen) * ctx.length / 256;
+        const uint16_t radius = static_cast<uint16_t>(within * ctx.length /
+                                                      (period * 2));
+        const uint8_t level =
+            static_cast<uint8_t>(255 - within * 255 / period);
+        const uint8_t pos = hashNoise(k, gen + 31);
+        const Rgb color = scale(paletteColor(ctx.palette, pos, ctx.primary), level);
+
+        if (origin + radius < ctx.length) ctx.buffer[origin + radius] = color;
+        if (origin >= radius) ctx.buffer[origin - radius] = color;
+    }
+}
+
+// Дождь: капли падают вдоль ленты, у каждой короткий хвост. Фаза каждой
+// капли своя, поэтому поток выглядит непрерывным.
+void fxRain(EffectContext& ctx) {
+    const uint32_t period = 2600 - ctx.speed * 9;   // 2600..305
+    const uint8_t  drops = 1 + (ctx.intensity >> 5);
+
+    for (uint16_t i = 0; i < ctx.length; ++i) ctx.buffer[i] = ctx.secondary;
+
+    for (uint8_t d = 0; d < drops; ++d) {
+        const uint32_t shifted = ctx.timeMs + d * 977u;
+        const uint32_t gen     = shifted / period;
+        const uint32_t within  = shifted % period;
+
+        const int32_t pos = static_cast<int32_t>(within * ctx.length / period);
+        const uint8_t hue = hashNoise(d, gen);
+
+        for (uint8_t k = 0; k < 4; ++k) {
+            const int32_t idx = pos - k;
+            if (idx < 0 || idx >= static_cast<int32_t>(ctx.length)) continue;
+            ctx.buffer[idx] = scale(paletteColor(ctx.palette, hue, ctx.primary),
+                                    static_cast<uint8_t>(255 >> k));
+        }
+    }
+}
+
+// Градиент: палитра, растянутая вдоль ленты и медленно ползущая.
+// В отличие от Rainbow идёт через палитру, а не через круг HSV.
+void fxGradient(EffectContext& ctx) {
+    const uint32_t t = scaledTime(ctx.timeMs, ctx.speed) / 100;
+    const uint16_t spread = 1 + (ctx.intensity >> 4);
+
+    for (uint16_t i = 0; i < ctx.length; ++i) {
+        const uint32_t p = (static_cast<uint32_t>(i) * spread * 255) / ctx.length;
+        ctx.buffer[i] = paletteColor(
+            ctx.palette, static_cast<uint8_t>((p + t) & 0xFF), ctx.primary);
+    }
+}
+
+// Бегущая волна яркости. Частота — от intensity, направление одно.
+void fxWave(EffectContext& ctx) {
+    const uint32_t t = scaledTime(ctx.timeMs, ctx.speed) / 30;
+    const uint8_t freq = 1 + (ctx.intensity >> 5);
+
+    for (uint16_t i = 0; i < ctx.length; ++i) {
+        const uint32_t phase =
+            (static_cast<uint32_t>(i) * freq * 256) / ctx.length + t;
+        const uint8_t level = sin8(static_cast<uint8_t>(phase & 0xFF));
+        const uint8_t pos = static_cast<uint8_t>(i * 255 / ctx.length);
+        ctx.buffer[i] = scale(paletteColor(ctx.palette, pos, ctx.primary), level);
+    }
+}
+
+// Искры: короткие резкие вспышки поверх приглушённой основы. От Twinkle
+// отличается тем, что вспышка гаснет быстро, а не по синусу.
+void fxSparkle(EffectContext& ctx) {
+    const uint32_t period = 700 - ctx.speed * 2;   // 700..190
+    const uint32_t gen = ctx.timeMs / period;
+    const uint8_t  within =
+        static_cast<uint8_t>((ctx.timeMs % period) * 255 / period);
+    const uint8_t threshold = 250 - ctx.intensity / 2;
+
+    for (uint16_t i = 0; i < ctx.length; ++i) {
+        const uint8_t pos = static_cast<uint8_t>(i * 255 / ctx.length);
+        const Rgb base = paletteColor(ctx.palette, pos, ctx.primary);
+        ctx.buffer[i] = scale(base, 40);
+
+        if (hashNoise(i, gen) > threshold) {
+            // Резкое затухание: вспышка живёт первую треть поколения.
+            const uint8_t level = within < 85
+                                      ? static_cast<uint8_t>(255 - within * 3)
+                                      : 0;
+            if (level) ctx.buffer[i] = scale(base, level);
+        }
+    }
+}
+
 struct EffectDef {
     const char* name;
     EffectFn    fn;
@@ -321,6 +505,14 @@ const EffectDef kEffects[] = {
     {"Scanner", fxScanner},
     {"Theater", fxTheater},
     {"Colorloop", fxColorloop},
+    {"Plasma", fxPlasma},
+    {"Noise", fxNoise},
+    {"Meteor", fxMeteor},
+    {"Ripple", fxRipple},
+    {"Rain", fxRain},
+    {"Gradient", fxGradient},
+    {"Wave", fxWave},
+    {"Sparkle", fxSparkle},
 };
 
 constexpr uint8_t kEffectCount = sizeof(kEffects) / sizeof(kEffects[0]);
