@@ -47,3 +47,6 @@ constexpr uint32_t kWifiConnectTimeoutMs = 20000;
 constexpr const char* kConfigPath   = "/config.json";
 constexpr const char* kSchedulePath = "/schedule.json";
 constexpr const char* kPresetsPath  = "/presets.json";
+// Состояние ленты — отдельно от конфига: меняется в разы чаще и не должно
+// тащить за собой перезапись настроек устройства.
+constexpr const char* kStatePath    = "/state.json";

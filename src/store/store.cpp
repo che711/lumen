@@ -4,6 +4,7 @@
 #include <LittleFS.h>
 
 #include "config.h"
+#include "core/state.h"
 
 namespace lumen {
 namespace {
@@ -13,6 +14,9 @@ std::vector<Rule> g_rules;
 
 bool     g_savePending = false;
 uint32_t g_saveDueAt   = 0;
+
+bool     g_stateSavePending = false;
+uint32_t g_stateSaveDueAt   = 0;
 
 const char* anchorTypeName(AnchorType t) {
     switch (t) {
@@ -117,6 +121,149 @@ void storeTick(uint32_t nowMs) {
         g_savePending = false;
         saveConfig();
     }
+    if (g_stateSavePending &&
+        static_cast<int32_t>(nowMs - g_stateSaveDueAt) >= 0) {
+        g_stateSavePending = false;
+        saveState();
+    }
+}
+
+// ------------------------------------------------------------- состояние
+
+void requestStateSave() {
+    g_stateSavePending = true;
+    g_stateSaveDueAt   = millis() + kConfigWriteDebounceMs;
+}
+
+String stateStoreToJson() {
+    JsonDocument doc;
+
+    {
+        StateLock st;
+        doc["on"]         = st->on;
+        doc["bri"]        = st->brightness;
+        doc["ps"]         = st->presetId;
+        doc["transition"] = st->transitionMs;
+
+        JsonArray segs = doc["seg"].to<JsonArray>();
+        for (uint8_t i = 0; i < MAX_SEGMENTS; ++i) {
+            const Segment& s = st->segments[i];
+            if (!s.active) continue;
+
+            JsonObject o = segs.add<JsonObject>();
+            o["id"]    = i;
+            o["start"] = s.start;
+            o["stop"]  = s.stop;
+            o["on"]    = s.on;
+            o["bri"]   = s.bri;
+            o["fx"]    = s.fx;
+            o["sx"]    = s.speed;
+            o["ix"]    = s.intensity;
+            o["pal"]   = s.palette;
+            o["rev"]   = s.reverse;
+
+            JsonArray c0 = o["c0"].to<JsonArray>();
+            c0.add(s.primary.r); c0.add(s.primary.g); c0.add(s.primary.b);
+            JsonArray c1 = o["c1"].to<JsonArray>();
+            c1.add(s.secondary.r); c1.add(s.secondary.g); c1.add(s.secondary.b);
+        }
+    }
+
+    String out;
+    serializeJson(doc, out);
+    return out;
+}
+
+bool stateStoreFromJson(const String& json, String& errorOut) {
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, json);
+    if (err) {
+        errorOut = String("Не удалось разобрать JSON: ") + err.c_str();
+        return false;
+    }
+    if (!doc.is<JsonObject>()) {
+        errorOut = "Ожидается объект состояния";
+        return false;
+    }
+
+    const uint16_t ledCount = g_config.ledCount;
+
+    StateLock st;
+    st->on           = doc["on"] | true;
+    st->brightness   = doc["bri"] | g_config.bootBrightness;
+    st->presetId     = doc["ps"] | -1;
+    st->transitionMs = doc["transition"] | st->transitionMs;
+
+    // Огибающую намеренно не восстанавливаем: планировщик посчитает её сам
+    // на первом тике, вместе с позицией внутри фейда.
+    st->scheduleEnvelope = 1.0f;
+
+    for (JsonObjectConst o : doc["seg"].as<JsonArrayConst>()) {
+        const int id = o["id"] | -1;
+        if (id < 0 || id >= MAX_SEGMENTS) continue;
+
+        Segment& s = st->segments[id];
+        s.active = true;
+        s.start  = o["start"] | 0;
+        s.stop   = o["stop"] | 0;
+
+        // Лента могла стать короче с прошлого запуска — иначе сегмент
+        // остался бы висеть за пределами буфера.
+        if (s.stop > ledCount) s.stop = ledCount;
+        if (s.start > s.stop) s.start = s.stop;
+
+        s.on        = o["on"] | true;
+        s.bri       = o["bri"] | 255;
+        // fx и pal не клампим: renderEffect и paletteColor делают это сами,
+        // а откат прошивки не должен ронять загрузку.
+        s.fx        = o["fx"] | 0;
+        s.speed     = o["sx"] | 128;
+        s.intensity = o["ix"] | 128;
+        s.palette   = o["pal"] | 0;
+        s.reverse   = o["rev"] | false;
+
+        JsonArrayConst c0 = o["c0"].as<JsonArrayConst>();
+        if (c0.size() >= 3) {
+            s.primary = Rgb{c0[0].as<uint8_t>(), c0[1].as<uint8_t>(),
+                            c0[2].as<uint8_t>()};
+        }
+        JsonArrayConst c1 = o["c1"].as<JsonArrayConst>();
+        if (c1.size() >= 3) {
+            s.secondary = Rgb{c1[0].as<uint8_t>(), c1[1].as<uint8_t>(),
+                              c1[2].as<uint8_t>()};
+        }
+    }
+
+    log_i("Состояние восстановлено: яркость %u", st->brightness);
+    return true;
+}
+
+bool saveState() {
+    File f = LittleFS.open(kStatePath, "w");
+    if (!f) {
+        log_e("Не удалось открыть %s на запись", kStatePath);
+        return false;
+    }
+    f.print(stateStoreToJson());
+    f.close();
+    return true;
+}
+
+bool loadState() {
+    File f = LittleFS.open(kStatePath, "r");
+    if (!f) {
+        log_i("state.json отсутствует — первый запуск");
+        return false;
+    }
+    String json = f.readString();
+    f.close();
+
+    String err;
+    if (!stateStoreFromJson(json, err)) {
+        log_e("state.json: %s", err.c_str());
+        return false;
+    }
+    return true;
 }
 
 // -------------------------------------------------------------- расписание

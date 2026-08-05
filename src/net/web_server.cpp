@@ -201,7 +201,7 @@ void onWsEvent(AsyncWebSocket*, AsyncWebSocketClient* client,
         if (deserializeJson(doc, data, len)) return;
         applyIncoming(doc.as<JsonObjectConst>());
         stateTouch();
-        requestConfigSave();
+        requestStateSave();
         webBroadcastState();
     }
 }
@@ -298,13 +298,56 @@ void webServerBegin() {
         req->send(res);
     });
 
+    // -------- своё: градиенты палитр для превью
+    //
+    // /json/pal остаётся WLED-совместимым списком имён — его читают чужие
+    // приложения. Опорные точки живут отдельно, чтобы интерфейс рисовал
+    // превью по данным прошивки, а не по своей копии палитр.
+
+    g_server.on("/api/palettes", HTTP_GET, [](AsyncWebServerRequest* req) {
+        auto* res = req->beginResponseStream("application/json");
+        JsonDocument doc;
+        JsonArray arr = doc.to<JsonArray>();
+
+        for (uint8_t i = 0; i < paletteCount(); ++i) {
+            JsonObject o = arr.add<JsonObject>();
+            o["n"] = paletteName(i);
+            JsonArray stops = o["stops"].to<JsonArray>();
+
+            auto addStop = [&stops](uint8_t p, uint8_t r, uint8_t g, uint8_t b) {
+                JsonArray a = stops.add<JsonArray>();
+                a.add(p); a.add(r); a.add(g); a.add(b);
+            };
+
+            // «Rainbow» считается по кругу HSV и опорных точек не хранит —
+            // для превью синтезируем их здесь. Пустой массив stops означает
+            // «взять текущий цвет сегмента», это случай «Default».
+            if (paletteStopCount(i) == 0 &&
+                strcmp(paletteName(i), "Rainbow") == 0) {
+                addStop(0, 255, 0, 0);     addStop(42, 255, 255, 0);
+                addStop(85, 0, 255, 0);    addStop(128, 0, 255, 255);
+                addStop(170, 0, 0, 255);   addStop(213, 255, 0, 255);
+                addStop(255, 255, 0, 0);
+                continue;
+            }
+
+            for (uint8_t k = 0; k < paletteStopCount(i); ++k) {
+                const PaletteStopInfo s = paletteStopAt(i, k);
+                addStop(s.pos, s.r, s.g, s.b);
+            }
+        }
+
+        serializeJson(doc, *res);
+        req->send(res);
+    });
+
     // -------- WLED-совместимая запись
 
     auto* stateHandler = new AsyncCallbackJsonWebHandler(
         "/json/state", [](AsyncWebServerRequest* req, JsonVariant& json) {
             applyIncoming(json.as<JsonObjectConst>());
             stateTouch();
-            requestConfigSave();
+            requestStateSave();
             webBroadcastState();
             req->send(200, "application/json", "{\"success\":true}");
         });
@@ -318,7 +361,7 @@ void webServerBegin() {
                               ? root
                               : root["state"].as<JsonObjectConst>());
             stateTouch();
-            requestConfigSave();
+            requestStateSave();
             webBroadcastState();
             req->send(200, "application/json", "{\"success\":true}");
         });
@@ -448,11 +491,16 @@ void webServerBegin() {
     // -------- бэкап и восстановление
 
     g_server.on("/api/backup", HTTP_GET, [](AsyncWebServerRequest* req) {
-        // Собираем один файл, который целиком описывает устройство.
+        // Собираем один файл, который целиком описывает устройство:
+        // расписание, сцены и текущий свет. Настройки самого устройства
+        // (Wi-Fi, пины, координаты) сюда намеренно не попадают — бэкап
+        // переносится между устройствами, а они у каждого свои.
         String out = "{\"lumen\":\"" LUMEN_VERSION "\",\"schedule\":";
         out += scheduleToJson();
         out += ",\"presets\":";
         out += presetsJson();
+        out += ",\"state\":";
+        out += stateStoreToJson();
         out += "}";
         auto* res = req->beginResponse(200, "application/json", out);
         res->addHeader("Content-Disposition",
@@ -484,6 +532,21 @@ void webServerBegin() {
                               String("{\"error\":\"пресеты: ") + err + "\"}");
                     return;
                 }
+            }
+
+            // Состояние восстанавливаем последним: пресеты к этому моменту
+            // уже на месте, и сцена, на которую ссылается presetId, есть.
+            if (!root["state"].isNull()) {
+                String body;
+                serializeJson(root["state"], body);
+                if (!stateStoreFromJson(body, err)) {
+                    req->send(400, "application/json",
+                              String("{\"error\":\"состояние: ") + err + "\"}");
+                    return;
+                }
+                saveState();
+                stateTouch();
+                webBroadcastState();
             }
 
             req->send(200, "application/json", "{\"success\":true}");

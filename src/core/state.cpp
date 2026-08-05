@@ -2,6 +2,7 @@
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#include <freertos/task.h>
 
 namespace lumen {
 namespace {
@@ -12,10 +13,24 @@ volatile bool      g_dirty = false;
 
 }  // namespace
 
+// Раньше здесь стоял захват с таймаутом 50 мс, а operator-> отдавал доступ к
+// состоянию независимо от того, удался он или нет. По таймауту это давало
+// молчаливую гонку: рендер на ядре 0 читает AppState, пока веб-обработчик на
+// ядре 1 его правит. Теперь ждём столько, сколько нужно, — держат мьютекс
+// микросекунды, а единственный способ получить настоящий дедлок разобран
+// отдельным случаем ниже.
 StateLock::StateLock() {
-    if (g_mutex) {
-        acquired_ = xSemaphoreTake(g_mutex, pdMS_TO_TICKS(50)) == pdTRUE;
+    if (!g_mutex) return;
+
+    // Повторный захват тем же таском: мьютекс FreeRTOS не рекурсивный, и
+    // ожидание здесь означало бы вечный сон. Но раз мы уже внутри критической
+    // секции этого же таска, состояние и так защищено — просто не берём
+    // мьютекс второй раз и не отдаём его в деструкторе.
+    if (xSemaphoreGetMutexHolder(g_mutex) == xTaskGetCurrentTaskHandle()) {
+        return;
     }
+
+    acquired_ = xSemaphoreTake(g_mutex, portMAX_DELAY) == pdTRUE;
 }
 
 StateLock::~StateLock() {
