@@ -23,6 +23,20 @@ namespace {
 AsyncWebServer   g_server(80);
 AsyncWebSocket   g_ws("/ws");
 
+// Проверка пароля на изменяющих ручках /api/*.
+//
+// Пустой пароль означает «защиты нет» — так работает первый запуск и так же
+// живёт большинство домашних установок. WLED-совместимые /json/* не
+// закрываются никогда: интеграция Home Assistant про пароли не знает, и
+// закрыв их, мы бы сломали ровно то, ради чего затевалась совместимость.
+bool authOk(AsyncWebServerRequest* req) {
+    const String& pass = config().apiPassword;
+    if (pass.isEmpty()) return true;
+    if (req->authenticate("lumen", pass.c_str())) return true;
+    req->requestAuthentication();
+    return false;
+}
+
 uint8_t clampIndex(int v, uint8_t count) {
     if (v < 0) return 0;
     return v >= count ? static_cast<uint8_t>(count - 1) : static_cast<uint8_t>(v);
@@ -79,10 +93,12 @@ void infoToJson(JsonObject root) {
 
     JsonObject leds = root["leds"].to<JsonObject>();
     leds["count"]  = config().ledCount;
-    leds["pwr"]    = 0;
+    // pwr — оценка потребления в мА, её показывают приложения WLED.
+    // maxpwr = 0 означает «ограничение не задано»: лимита тока у нас нет.
+    leds["pwr"]    = statsMilliamps();
     leds["maxpwr"] = 0;
     leds["maxseg"] = MAX_SEGMENTS;
-    leds["fps"]    = 0;
+    leds["fps"]    = statsFps();
 
     root["name"]    = config().name;
     root["udpport"] = 21324;
@@ -226,7 +242,8 @@ const char kPlaceholder[] PROGMEM = R"HTML(<!doctype html>
  li{margin:6px 0;font-size:14px}
 </style></head><body><main>
 <h1>Lumen работает</h1>
-<p>Веб-интерфейс появится на этапе M3. Пока управление доступно через API.</p>
+<p>Интерфейс не найден на файловой системе. Залейте его командой
+<code>pio run -t uploadfs</code>. Пока управление доступно через API.</p>
 <ul>
  <li><code>GET /json</code> — состояние, эффекты, палитры</li>
  <li><code>POST /json/state</code> — управление</li>
@@ -375,6 +392,7 @@ void webServerBegin() {
 
     auto* schedHandler = new AsyncCallbackJsonWebHandler(
         "/api/schedule", [](AsyncWebServerRequest* req, JsonVariant& json) {
+            if (!authOk(req)) return;
             String body;
             serializeJson(json, body);
             String err;
@@ -402,6 +420,7 @@ void webServerBegin() {
     });
 
     g_server.on("/api/presets", HTTP_DELETE, [](AsyncWebServerRequest* req) {
+        if (!authOk(req)) return;
         if (!req->hasParam("id")) {
             req->send(400, "application/json", "{\"error\":\"нужен id\"}");
             return;
@@ -432,6 +451,8 @@ void webServerBegin() {
         doc["tz"]       = config().timezone;
         doc["maxLeds"]  = MAX_LEDS;
         doc["maxSeg"]   = MAX_SEGMENTS;
+        // Сам пароль наружу не отдаём — только факт, что он задан.
+        doc["authSet"]  = !config().apiPassword.isEmpty();
         String out;
         serializeJson(doc, out);
         req->send(200, "application/json", out);
@@ -439,6 +460,7 @@ void webServerBegin() {
 
     auto* configHandler = new AsyncCallbackJsonWebHandler(
         "/api/config", [](AsyncWebServerRequest* req, JsonVariant& json) {
+            if (!authOk(req)) return;
             JsonObjectConst o = json.as<JsonObjectConst>();
             bool needsReboot = false;
 
@@ -471,6 +493,10 @@ void webServerBegin() {
                 config().timezone = o["tz"].as<String>();
                 needsReboot = true;  // TZ применяется при configTzTime
             }
+            if (!o["apiPass"].isNull()) {
+                config().apiPassword = o["apiPass"].as<String>();
+                needsReboot = true;  // пароль OTA ставится при старте
+            }
 
             saveConfig();
 
@@ -484,6 +510,7 @@ void webServerBegin() {
     g_server.addHandler(configHandler);
 
     g_server.on("/api/reboot", HTTP_POST, [](AsyncWebServerRequest* req) {
+        if (!authOk(req)) return;
         req->send(200, "application/json", "{\"success\":true}");
         req->onDisconnect([]() { ESP.restart(); });
     });
@@ -510,6 +537,7 @@ void webServerBegin() {
 
     auto* restoreHandler = new AsyncCallbackJsonWebHandler(
         "/api/backup", [](AsyncWebServerRequest* req, JsonVariant& json) {
+            if (!authOk(req)) return;
             JsonObjectConst root = json.as<JsonObjectConst>();
             String err;
 

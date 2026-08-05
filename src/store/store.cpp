@@ -80,6 +80,7 @@ bool loadConfig() {
     g_config.name     = doc["name"] | g_config.name;
     g_config.wifiSsid = doc["wifi"]["ssid"] | "";
     g_config.wifiPass = doc["wifi"]["pass"] | "";
+    g_config.apiPassword = doc["apiPass"] | "";
     g_config.ledCount = doc["led"]["count"] | g_config.ledCount;
     g_config.ledPin   = doc["led"]["pin"] | g_config.ledPin;
     g_config.bootBrightness = doc["led"]["bootBri"] | g_config.bootBrightness;
@@ -97,6 +98,7 @@ bool saveConfig() {
     doc["name"] = g_config.name;
     doc["wifi"]["ssid"] = g_config.wifiSsid;
     doc["wifi"]["pass"] = g_config.wifiPass;
+    doc["apiPass"]      = g_config.apiPassword;
     doc["led"]["count"] = g_config.ledCount;
     doc["led"]["pin"]   = g_config.ledPin;
     doc["led"]["bootBri"] = g_config.bootBrightness;

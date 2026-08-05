@@ -84,4 +84,11 @@ AppState stateSnapshot();
 void stateTouch();
 bool stateConsumeDirty();
 
+// Телеметрия рендера. Пишется контроллером ленты с ядра рендера, читается
+// веб-обработчиками — поэтому лежит здесь, а не в LedController: до него
+// из web_server.cpp не дотянуться, он живёт объектом в main.cpp.
+void statsPublish(uint16_t fps, uint16_t milliamps);
+uint16_t statsFps();
+uint16_t statsMilliamps();
+
 }  // namespace lumen
