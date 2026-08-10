@@ -58,6 +58,21 @@ AppState stateSnapshot() {
     return *st;
 }
 
+namespace {
+// Простые счётчики: пишет один таск, читают обработчики. Рваться тут нечему,
+// значения независимы и устаревают максимум на кадр.
+volatile uint16_t g_fps = 0;
+volatile uint16_t g_mA  = 0;
+}  // namespace
+
+void statsPublish(uint16_t fps, uint16_t milliamps) {
+    g_fps = fps;
+    g_mA  = milliamps;
+}
+
+uint16_t statsFps() { return g_fps; }
+uint16_t statsMilliamps() { return g_mA; }
+
 void stateTouch() { g_dirty = true; }
 
 bool stateConsumeDirty() {

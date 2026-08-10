@@ -19,6 +19,12 @@ struct DeviceConfig {
     String  wifiSsid;
     String  wifiPass;
 
+    // Пароль на изменяющие ручки /api/* и на OTA. Пустой — защиты нет:
+    // устройство в домашней сети, и требовать пароль с первого запуска
+    // незачем. WLED-совместимые /json/* не закрываются никогда, иначе
+    // отвалится интеграция Home Assistant.
+    String  apiPassword;
+
     uint16_t ledCount = 60;
     uint8_t  ledPin   = LED_PIN;
 
