@@ -10,6 +10,12 @@ g++ -std=c++17 -Wall -Wextra -I lib/schedule lib/schedule/*.cpp \
 "$TMP/lumen_sched"
 
 echo
+echo "=== раскладка диодов ==="
+g++ -std=c++17 -Wall -Wextra -I lib/layout lib/layout/*.cpp \
+    test/test_layout/test_main.cpp -o "$TMP/lumen_layout"
+"$TMP/lumen_layout"
+
+echo
 echo "=== движок эффектов ==="
 scripts/test_effects.sh
 
