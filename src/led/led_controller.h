@@ -8,7 +8,10 @@
 
 #include <Arduino.h>
 
+#include <vector>
+
 #include "core/state.h"
+#include "layout.h"
 
 namespace lumen {
 
@@ -42,6 +45,13 @@ class LedController {
     Rgb*     frame_    = nullptr;   // результат эффектов, до яркости
     Rgb*     prev_     = nullptr;   // кадр до смены сцены, для перехода
     void*    strip_    = nullptr;   // NeoPixelBus, спрятан за void* ради заголовка
+
+    // Раскладка диодов: копия из core/layout_state (обновляется, когда меняется
+    // версия), буфер сегмента в виртуальном порядке и перестановка на сегмент.
+    std::vector<layout::Point> layout_;
+    uint32_t           layoutVer_ = 0;
+    Rgb*               scratch_   = nullptr;
+    layout::OrderCache orders_[MAX_SEGMENTS];
 
     uint32_t lookFp_ = 0;
     bool     haveLook_ = false;

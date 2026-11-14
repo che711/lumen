@@ -4,6 +4,8 @@
 #include <LittleFS.h>
 
 #include "config.h"
+#include "core/layout_json.h"
+#include "core/layout_state.h"
 #include "core/state.h"
 
 namespace lumen {
@@ -54,6 +56,7 @@ bool storeBegin() {
     }
     loadConfig();
     loadSchedule();
+    loadLayout();
     return true;
 }
 
@@ -163,6 +166,7 @@ String stateStoreToJson() {
             o["ix"]    = s.intensity;
             o["pal"]   = s.palette;
             o["rev"]   = s.reverse;
+            o["lmap"]  = layout::axisName(s.lmap);
 
             JsonArray c0 = o["c0"].to<JsonArray>();
             c0.add(s.primary.r); c0.add(s.primary.g); c0.add(s.primary.b);
@@ -223,6 +227,8 @@ bool stateStoreFromJson(const String& json, String& errorOut) {
         s.intensity = o["ix"] | 128;
         s.palette   = o["pal"] | 0;
         s.reverse   = o["rev"] | false;
+        s.lmap      = layout::Axis::Wire;
+        layout::axisFromName(o["lmap"] | "wire", &s.lmap);
 
         JsonArrayConst c0 = o["c0"].as<JsonArrayConst>();
         if (c0.size() >= 3) {
@@ -265,6 +271,60 @@ bool loadState() {
         log_e("state.json: %s", err.c_str());
         return false;
     }
+    return true;
+}
+
+// ---------------------------------------------------------------- раскладка
+
+String layoutToJson() {
+    JsonDocument doc;
+    layoutWrite(layoutGet(), doc.to<JsonObject>());
+    String out;
+    serializeJson(doc, out);
+    return out;
+}
+
+bool layoutFromJson(const String& json, String& errorOut) {
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, json);
+    if (err) {
+        errorOut = String("Не удалось разобрать JSON: ") + err.c_str();
+        return false;
+    }
+
+    std::vector<layout::Point> pts;
+    const char* why = nullptr;
+    if (!layoutParse(doc.as<JsonVariantConst>(), MAX_LEDS, pts, why)) {
+        errorOut = why;
+        return false;
+    }
+    layoutSet(std::move(pts));
+    return true;
+}
+
+bool saveLayout() {
+    File f = LittleFS.open(kLayoutPath, "w");
+    if (!f) {
+        log_e("Не удалось открыть %s на запись", kLayoutPath);
+        return false;
+    }
+    f.print(layoutToJson());
+    f.close();
+    return true;
+}
+
+bool loadLayout() {
+    File f = LittleFS.open(kLayoutPath, "r");
+    if (!f) return false;   // раскладки нет — это нормально
+    String json = f.readString();
+    f.close();
+
+    String err;
+    if (!layoutFromJson(json, err)) {
+        log_e("layout.json: %s", err.c_str());
+        return false;
+    }
+    log_i("Раскладка загружена: %u диодов", static_cast<unsigned>(layoutGet().size()));
     return true;
 }
 

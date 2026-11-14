@@ -16,6 +16,6 @@ cat > "$STUB/Arduino.h" <<'HDR'
 #endif
 HDR
 
-g++ -std=c++17 -Wall -Wextra -I "$STUB" -I include -I src \
+g++ -std=c++17 -Wall -Wextra -I "$STUB" -I include -I src -I lib/layout \
     src/led/effects.cpp test/effects/fx_smoke.cpp -o "${TMPDIR:-/tmp}/lumen_fx"
 "${TMPDIR:-/tmp}/lumen_fx"

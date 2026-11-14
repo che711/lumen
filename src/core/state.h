@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "config.h"
+#include "layout.h"
 
 namespace lumen {
 
@@ -32,6 +33,10 @@ struct Segment {
     Rgb secondary{0, 0, 0};
 
     bool reverse = false;
+
+    // Ось раскладки: по какой оси эффект «видит» диоды сегмента. Wire — по
+    // порядку провода, как без раскладки.
+    layout::Axis lmap = layout::Axis::Wire;
 
     uint16_t length() const { return stop > start ? stop - start : 0; }
 };
