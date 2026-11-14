@@ -45,6 +45,7 @@ void segmentToPresetJson(const Segment& seg, uint8_t id, JsonObject o) {
     o["ix"]    = seg.intensity;
     o["pal"]   = seg.palette;
     o["rev"]   = seg.reverse;
+    o["lmap"]  = layout::axisName(seg.lmap);
 
     JsonArray col = o["col"].to<JsonArray>();
     JsonArray c0 = col.add<JsonArray>();
@@ -100,6 +101,7 @@ bool presetApply(int id) {
         if (!o["ix"].isNull())    seg.intensity = o["ix"].as<uint8_t>();
         if (!o["pal"].isNull())   seg.palette = clampIdx(o["pal"], paletteCount());
         if (!o["rev"].isNull())   seg.reverse = o["rev"].as<bool>();
+        if (!o["lmap"].isNull())  layout::axisFromName(o["lmap"] | "", &seg.lmap);
 
         JsonArrayConst col = o["col"].as<JsonArrayConst>();
         uint8_t slot = 0;

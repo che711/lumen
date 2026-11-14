@@ -7,6 +7,7 @@
 #include <new>
 
 #include "config.h"
+#include "core/layout_state.h"
 #include "effects.h"
 
 namespace lumen {
@@ -82,6 +83,11 @@ bool LedController::begin(uint16_t ledCount, uint8_t pin) {
     prev_ = new (std::nothrow) Rgb[ledCount_]();
     if (!prev_) log_w("Нет памяти на буфер перехода — смена сцены будет резкой");
 
+    // Буфер для рисования по раскладке. Без него раскладка просто не
+    // применяется, и эффекты идут по проводу, как раньше.
+    scratch_ = new (std::nothrow) Rgb[ledCount_]();
+    if (!scratch_) log_w("Нет памяти на буфер раскладки — эффекты пойдут по проводу");
+
     Strip* strip = new (std::nothrow) Strip(ledCount_, pin);
     if (!strip) return false;
     strip->Begin();
@@ -111,6 +117,7 @@ uint32_t LedController::lookFingerprint(const AppState& state) {
         mix(g.start);
         mix(g.stop);
         mix(g.reverse ? 1u : 0u);
+        mix(static_cast<uint32_t>(g.lmap));
         mix((static_cast<uint32_t>(g.primary.r) << 16) |
             (static_cast<uint32_t>(g.primary.g) << 8) | g.primary.b);
         mix((static_cast<uint32_t>(g.secondary.r) << 16) |
@@ -121,6 +128,8 @@ uint32_t LedController::lookFingerprint(const AppState& state) {
 
 void LedController::render(const AppState& state, uint32_t nowMs) {
     if (!strip_ || !frame_) return;
+
+    if (layoutVersion() != layoutVer_) layoutSyncTo(layout_, layoutVer_);
 
     // Смена сцены: запоминаем последний показанный кадр и запускаем переход.
     // Делать это надо до очистки frame_ — там ещё лежит предыдущий кадр.
@@ -148,8 +157,17 @@ void LedController::render(const AppState& state, uint32_t nowMs) {
 
         const uint16_t len = stop - start;
 
+        // Эффект рисует в виртуальном порядке: либо прямо в кадр (по
+        // проводу), либо в промежуточный буфер, который потом раскладывается
+        // по физическим диодам.
+        const bool mapped =
+            scratch_ &&
+            orders_[s].update(layout_.data(), static_cast<uint16_t>(layout_.size()),
+                              layoutVer_, start, stop, seg.lmap);
+        if (mapped) memset(scratch_, 0, sizeof(Rgb) * len);
+
         EffectContext ctx;
-        ctx.buffer    = frame_ + start;
+        ctx.buffer    = mapped ? scratch_ : frame_ + start;
         ctx.length    = len;
         ctx.timeMs    = nowMs;
         ctx.speed     = seg.speed;
@@ -175,6 +193,10 @@ void LedController::render(const AppState& state, uint32_t nowMs) {
                 ctx.buffer[i] = ctx.buffer[len - 1 - i];
                 ctx.buffer[len - 1 - i] = tmp;
             }
+        }
+
+        if (mapped) {
+            layout::scatter(scratch_, frame_ + start, orders_[s].data(), len);
         }
     }
 

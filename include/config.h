@@ -50,3 +50,4 @@ constexpr const char* kPresetsPath  = "/presets.json";
 // Состояние ленты — отдельно от конфига: меняется в разы чаще и не должно
 // тащить за собой перезапись настроек устройства.
 constexpr const char* kStatePath    = "/state.json";
+constexpr const char* kLayoutPath   = "/layout.json";

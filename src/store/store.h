@@ -66,4 +66,12 @@ bool saveSchedule();
 String scheduleToJson();
 bool scheduleFromJson(const String& json, String& errorOut);
 
+// Раскладка диодов: точки x, y по порядку провода. Сама раскладка лежит в
+// core/layout_state, здесь только файл и JSON. Пустого файла нет — значит,
+// раскладки нет и эффекты идут по проводу.
+bool loadLayout();
+bool saveLayout();
+String layoutToJson();
+bool layoutFromJson(const String& json, String& errorOut);
+
 }  // namespace lumen

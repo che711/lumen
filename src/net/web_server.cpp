@@ -10,6 +10,7 @@
 #include <WiFi.h>
 
 #include "config.h"
+#include "core/layout_state.h"
 #include "core/presets.h"
 #include "core/scheduler_runner.h"
 #include "core/state.h"
@@ -63,6 +64,7 @@ void segmentToJson(const Segment& seg, uint8_t id, JsonObject o) {
     o["ix"]  = seg.intensity;
     o["pal"] = seg.palette;
     o["rev"] = seg.reverse;
+    o["lmap"] = layout::axisName(seg.lmap);
     o["sel"] = true;
 }
 
@@ -140,6 +142,7 @@ void applySegment(JsonObjectConst o, Segment& seg, uint16_t ledCount) {
         seg.palette = clampIndex(o["pal"].as<int>(), paletteCount());
     }
     if (!o["rev"].isNull()) seg.reverse = o["rev"].as<bool>();
+    if (!o["lmap"].isNull()) layout::axisFromName(o["lmap"] | "", &seg.lmap);
 
     JsonArrayConst col = o["col"].as<JsonArrayConst>();
     if (!col.isNull()) {
@@ -409,6 +412,33 @@ void webServerBegin() {
         });
     g_server.addHandler(schedHandler);
 
+    // -------- своё: раскладка диодов
+
+    g_server.on("/api/layout", HTTP_GET, [](AsyncWebServerRequest* req) {
+        req->send(200, "application/json", layoutToJson());
+    });
+
+    // 1200 диодов в JSON — около 14 КБ, а предел по умолчанию 16 КБ.
+    auto* layoutHandler = new AsyncCallbackJsonWebHandler(
+        "/api/layout", [](AsyncWebServerRequest* req, JsonVariant& json) {
+            if (!authOk(req)) return;
+            String body;
+            serializeJson(json, body);
+            String err;
+            if (!layoutFromJson(body, err)) {
+                JsonDocument doc;
+                doc["error"] = err;
+                String out;
+                serializeJson(doc, out);
+                req->send(400, "application/json", out);
+                return;
+            }
+            saveLayout();
+            req->send(200, "application/json", "{\"success\":true}");
+        });
+    layoutHandler->setMaxContentLength(32768);
+    g_server.addHandler(layoutHandler);
+
     // -------- пресеты
 
     g_server.on("/presets.json", HTTP_GET, [](AsyncWebServerRequest* req) {
@@ -524,6 +554,8 @@ void webServerBegin() {
         // переносится между устройствами, а они у каждого свои.
         String out = "{\"lumen\":\"" LUMEN_VERSION "\",\"schedule\":";
         out += scheduleToJson();
+        out += ",\"layout\":";
+        out += layoutToJson();
         out += ",\"presets\":";
         out += presetsJson();
         out += ",\"state\":";
@@ -550,6 +582,17 @@ void webServerBegin() {
                     return;
                 }
                 saveSchedule();
+            }
+
+            if (!root["layout"].isNull()) {
+                String body;
+                serializeJson(root["layout"], body);
+                if (!layoutFromJson(body, err)) {
+                    req->send(400, "application/json",
+                              String("{\"error\":\"раскладка: ") + err + "\"}");
+                    return;
+                }
+                saveLayout();
             }
 
             if (!root["presets"].isNull()) {
