@@ -46,8 +46,8 @@ const char kPortalPage[] PROGMEM = R"HTML(<!doctype html>
   button:hover { background:#d9954a; }
 </style></head><body><main>
 <h1>Подключить Lumen к сети</h1>
-<p class="sub">Контроллер перезапустится и появится в вашей сети под именем
-   lumen.local</p>
+<p class="sub">Контроллер перезапустится и подключится к вашей сети. Его
+   адрес смотрите в списке клиентов роутера (имя Lumen).</p>
 <form method="POST" action="/wifi">
   <label for="s">Имя сети Wi-Fi</label>
   <input id="s" name="ssid" autocomplete="off" required>

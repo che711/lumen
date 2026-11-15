@@ -11,6 +11,10 @@ bool g_ready = false;
 void otaBegin(const String& hostname) {
     ArduinoOTA.setHostname(hostname.c_str());
 
+    // ArduinoOTA по умолчанию сам поднимает mDNS. Он не нужен: прошивать
+    // по воздуху надо по IP.
+    ArduinoOTA.setMdnsEnabled(false);
+
     // Без пароля перепрошить устройство может кто угодно в локальной сети.
     // Молча оставлять так нельзя — если пароля нет, пишем об этом в лог.
     if (!config().apiPassword.isEmpty()) {
@@ -32,7 +36,7 @@ void otaBegin(const String& hostname) {
 
     ArduinoOTA.begin();
     g_ready = true;
-    log_i("OTA доступно как %s", hostname.c_str());
+    log_i("OTA доступно по IP");
 }
 
 void otaTick() {

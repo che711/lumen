@@ -16,6 +16,12 @@ g++ -std=c++17 -Wall -Wextra -I lib/layout lib/layout/*.cpp \
 "$TMP/lumen_layout"
 
 echo
+echo "=== предпросмотр ==="
+g++ -std=c++17 -Wall -Wextra -I lib/liveview lib/liveview/*.cpp \
+    test/test_liveview/test_main.cpp -o "$TMP/lumen_liveview"
+"$TMP/lumen_liveview"
+
+echo
 echo "=== движок эффектов ==="
 scripts/test_effects.sh
 

@@ -1,4 +1,4 @@
-// net.h — сетевой слой: подключение, портал настройки, mDNS, HTTP/WS, OTA.
+// net.h — сетевой слой: подключение, портал настройки, HTTP/WS, OTA.
 #pragma once
 
 #include <Arduino.h>
@@ -12,13 +12,9 @@ bool netConnectOrProvision();
 
 void netTick();
 
-// Анонс mDNS. Сервис `_wled._tcp` — именно его слушает нативная
-// интеграция WLED в Home Assistant, поэтому устройство находится
-// автоматически, без custom_component и без YAML.
-void discoveryBegin(const String& hostname);
-
 void webServerBegin();
 void webBroadcastState();   // толкнуть текущее состояние в WebSocket
+void webTick(uint32_t nowMs);   // кадры предпросмотра подписчикам
 
 void otaBegin(const String& hostname);
 void otaTick();

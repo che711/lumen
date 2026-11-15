@@ -33,7 +33,7 @@ try { eval(src); console.log("Загрузка и bindUI прошли без и�
 catch(e){ console.log("ОШИБКА:", e.message); process.exit(1); }
 
 // Проверяем чистые функции через повторный eval в области видимости
-const helpers = eval(src + "; ({minToHHMM, hhmmToMin, rgbToHex, hexToRgb, anchorLabel, formatUptime, L, layLeds, layGen})");
+const helpers = eval(src + "; ({minToHHMM, hhmmToMin, rgbToHex, hexToRgb, anchorLabel, formatUptime, L, layLeds, layGen, layParseFrame, layColor, layGlobal, layNearest})");
 const t=[];
 const ok=(c,m)=>t.push([c,m]);
 ok(helpers.minToHHMM(0)==="00:00","полночь");
@@ -62,6 +62,29 @@ const hex={id:1,t:"poly",n:18,s:46,k:6,x:90,y:90,r:0}, hp=helpers.layGen(hex);
 ok(hp.length===18,"шестиугольник: 18 диодов");
 ok(Math.abs(hp[0][0]-46)<1e-9 && Math.abs(hp[0][1])<1e-9,"шестиугольник: первый диод в вершине");
 ok(hp.every(q=>Math.hypot(q[0],q[1])<=46+1e-9),"шестиугольник: диоды не выходят за описанную окружность");
+// Кадр предпросмотра и номера диодов.
+const fr=(a)=>helpers.layParseFrame(new Uint8Array(a).buffer);
+const f2=fr([1,0,2, 255,0,0, 0,255,0]);
+ok(f2 && f2.length===6 && f2[0]===255 && f2[4]===255,"кадр: два диода, цвета по порядку");
+ok(fr([2,0,1,1,2,3])===null,"кадр: чужой тип сообщения");
+ok(fr([1,0,3, 1,2,3, 4,5,6])===null,"кадр: оборванное сообщение");
+ok(fr([1])===null,"кадр: короче заголовка");
+ok(fr([1,0,0]).length===0,"кадр: пустой, но целый");
+ok(fr([1,4,176].concat(new Array(3600).fill(7))).length===3600,"кадр: 1200 диодов, число в двух байтах");
+L.live=true; L.frame=new Uint8Array([10,20,30]);
+ok(helpers.layColor(0,false)==="rgb(10,20,30)","цвет диода из кадра");
+ok(helpers.layColor(1,true)==="var(--muted)" || helpers.layColor(1,true)==="var(--glow)","диод за пределами кадра красится по-обычному");
+L.live=false;
+ok(helpers.layColor(0,true)==="var(--glow)" && helpers.layColor(0,false)==="var(--muted)","без предпросмотра: выбранная деталь ярче");
+L.parts=[{id:1,t:"poly",n:18,s:46,k:6,x:0,y:0,r:0},{id:2,t:"free",n:3,s:0,x:0,y:0,r:0,P:[[1,1],[2,2],[3,3]]},{id:3,t:"dot",n:1,s:0,x:0,y:0,r:0}];
+ok(helpers.layGlobal(L.parts[0],5)===5,"номер диода в первой детали");
+ok(helpers.layGlobal(L.parts[1],2)===20,"номер диода во второй детали: после 18 диодов первой");
+ok(helpers.layGlobal(L.parts[2],0)===21,"номер диода в третьей детали");
+// Выбор диода по нажатию: ближайший, а не верхний.
+L.hit=[0,1,2,3].map(i=>({p:1,g:i,j:i,free:false,x:100+i*6,y:100}));
+ok(helpers.layNearest(100+5*6/2*0+17,100).g===3,"ближайший диод на плотной ленте (шаг 6)");
+ok(helpers.layNearest(100,100).g===0,"нажатие точно в диод");
+ok(helpers.layNearest(100,130)===null,"далеко от диодов — ничего не выбрано");
 let bad=0;
 for(const [c,m] of t){ if(!c){ console.log("  FAIL",m); bad++; } }
 console.log(`Пройдено ${t.length-bad} из ${t.length}`);
