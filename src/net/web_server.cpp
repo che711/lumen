@@ -11,6 +11,8 @@
 
 #include "config.h"
 #include "core/layout_state.h"
+#include "core/live_state.h"
+#include "liveview.h"
 #include "core/presets.h"
 #include "core/scheduler_runner.h"
 #include "core/state.h"
@@ -204,8 +206,37 @@ void applyIncoming(JsonObjectConst root) {
 
 // --------------------------------------------------------------- WebSocket
 
+// Подписчики на кадры предпросмотра: страница раскладки просит их сообщением
+// {"lumenPreview":true}. Больше нескольких вкладок сразу не нужно.
+constexpr uint8_t kMaxPreview = 4;
+uint32_t g_previewIds[kMaxPreview];
+uint8_t  g_previewCount = 0;
+
+void previewRemove(uint32_t id) {
+    for (uint8_t i = 0; i < g_previewCount; ++i) {
+        if (g_previewIds[i] == id) {
+            g_previewIds[i] = g_previewIds[--g_previewCount];
+            break;
+        }
+    }
+    liveSetWanted(g_previewCount > 0);
+}
+
+void previewAdd(uint32_t id) {
+    for (uint8_t i = 0; i < g_previewCount; ++i)
+        if (g_previewIds[i] == id) return;
+    if (g_previewCount < kMaxPreview) g_previewIds[g_previewCount++] = id;
+    liveSetWanted(g_previewCount > 0);
+}
+
 void onWsEvent(AsyncWebSocket*, AsyncWebSocketClient* client,
                AwsEventType type, void*, uint8_t* data, size_t len) {
+    if (type == WS_EVT_DISCONNECT) {
+        previewRemove(client->id());
+        liveIdentify(-1, millis());
+        return;
+    }
+
     if (type == WS_EVT_CONNECT) {
         JsonDocument doc;
         stateToJson(stateSnapshot(), doc.to<JsonObject>());
@@ -218,6 +249,18 @@ void onWsEvent(AsyncWebSocket*, AsyncWebSocketClient* client,
     if (type == WS_EVT_DATA) {
         JsonDocument doc;
         if (deserializeJson(doc, data, len)) return;
+
+        // Служебные сообщения редактора раскладки состояние не меняют.
+        if (!doc["lumenPreview"].isNull()) {
+            if (doc["lumenPreview"].as<bool>()) previewAdd(client->id());
+            else previewRemove(client->id());
+            return;
+        }
+        if (!doc["identify"].isNull()) {
+            liveIdentify(doc["identify"].as<int>(), millis());
+            return;
+        }
+
         applyIncoming(doc.as<JsonObjectConst>());
         stateTouch();
         requestStateSave();
@@ -266,6 +309,29 @@ void webBroadcastState() {
     String out;
     serializeJson(doc, out);
     g_ws.textAll(out);
+}
+
+void webTick(uint32_t nowMs) {
+    static uint32_t last = 0;
+    if (g_previewCount == 0 || nowMs - last < 100) return;
+    last = nowMs;
+
+    static uint8_t rgb[3 * MAX_LEDS];
+    static uint8_t msg[liveview::kHeaderBytes + 3 * MAX_LEDS];
+    const uint16_t n = liveRead(rgb, MAX_LEDS);
+    if (n == 0) return;
+    const size_t bytes = liveview::packFrame(rgb, n, msg);
+
+    for (uint8_t i = 0; i < g_previewCount;) {
+        AsyncWebSocketClient* c = g_ws.client(g_previewIds[i]);
+        if (!c) {                       // клиент ушёл, не отписавшись
+            previewRemove(g_previewIds[i]);
+            continue;
+        }
+        // Очередь клиента маленькая: если он не успевает, кадр пропускаем.
+        if (c->canSend()) c->binary(msg, bytes);
+        ++i;
+    }
 }
 
 void webServerBegin() {

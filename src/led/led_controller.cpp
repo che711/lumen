@@ -8,6 +8,8 @@
 
 #include "config.h"
 #include "core/layout_state.h"
+#include "core/live_state.h"
+#include "liveview.h"
 #include "effects.h"
 
 namespace lumen {
@@ -87,6 +89,9 @@ bool LedController::begin(uint16_t ledCount, uint8_t pin) {
     // применяется, и эффекты идут по проводу, как раньше.
     scratch_ = new (std::nothrow) Rgb[ledCount_]();
     if (!scratch_) log_w("Нет памяти на буфер раскладки — эффекты пойдут по проводу");
+
+    previewBuf_ = new (std::nothrow) uint8_t[3u * ledCount_];
+    if (!previewBuf_) log_w("Нет памяти на буфер предпросмотра");
 
     Strip* strip = new (std::nothrow) Strip(ledCount_, pin);
     if (!strip) return false;
@@ -218,6 +223,12 @@ void LedController::render(const AppState& state, uint32_t nowMs) {
         }
     }
 
+    // Редактор раскладки держит палец на диоде: горит только он.
+    const int identified = liveIdentified(nowMs);
+    if (identified >= 0) {
+        liveview::applyIdentify(frame_, ledCount_, identified, Rgb{255, 255, 255});
+    }
+
     applyAndShow(state.effectiveBrightness());
 
     // Монотонный счётчик кадров — фаза дизеринга. Отдельно от frameCount_,
@@ -242,18 +253,33 @@ void LedController::applyAndShow(uint8_t globalBrightness) {
 
     uint32_t sum = 0;
 
+    // Кадр для предпросмотра копируем раз в 100 мс и только если кто-то
+    // подписан: иначе это лишняя запись на каждый кадр.
+    const uint32_t now = millis();
+    const bool preview = previewBuf_ && liveWanted() && now - lastPreviewMs_ >= 100;
+    if (preview) lastPreviewMs_ = now;
+
     for (uint16_t i = 0; i < ledCount_; ++i) {
         const Rgb& c = frame_[i];
         // Яркость применяется до гаммы — так слайдер получается перцептивно
         // линейным. Точность нижней части шкалы вытягивает 16-битная таблица
         // с дизерингом на выходе.
-        const uint8_t r = quantize(gamma16(scale8(c.r, globalBrightness)), i, frameSeq_);
-        const uint8_t g = quantize(gamma16(scale8(c.g, globalBrightness)), i, frameSeq_);
-        const uint8_t b = quantize(gamma16(scale8(c.b, globalBrightness)), i, frameSeq_);
+        const uint8_t sr = scale8(c.r, globalBrightness);
+        const uint8_t sg = scale8(c.g, globalBrightness);
+        const uint8_t sb = scale8(c.b, globalBrightness);
+        if (preview) {
+            previewBuf_[3u * i]      = sr;
+            previewBuf_[3u * i + 1u] = sg;
+            previewBuf_[3u * i + 2u] = sb;
+        }
+        const uint8_t r = quantize(gamma16(sr), i, frameSeq_);
+        const uint8_t g = quantize(gamma16(sg), i, frameSeq_);
+        const uint8_t b = quantize(gamma16(sb), i, frameSeq_);
         sum += static_cast<uint32_t>(r) + g + b;
         strip->SetPixelColor(i, RgbColor(r, g, b));
     }
     strip->Show();
+    if (preview) livePublish(previewBuf_, ledCount_);
 
     // Оценка потребления: каждый кристалл на полной яркости — около 20 мА,
     // плюс примерно 1 мА покоя на диод. Это прикидка для интерфейса, а не

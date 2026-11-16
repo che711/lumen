@@ -217,8 +217,9 @@ FastLED под MIT. Из WLED палитры **не копируются**: он
 - `/json/info` отдаёт `"ver": "0.15.0"` — интеграция Home Assistant
   отказывается работать с прошивками старше 0.14.0. Свой номер лежит
   рядом, в поле `"lumen"`.
-- mDNS анонсит сервис `_wled._tcp` — по нему HA находит устройство.
-  Переименуешь — автообнаружение отвалится.
+- mDNS убран: автообнаружения Home Assistant нет, интеграция WLED
+  добавляется вручную по IP. Адрес устройство печатает в Serial строкой
+  `IP: …` (через `Serial.printf`, не `log_i`) и показывает в `/json/info`.
 - Схема сегментов (`col` как массив массивов, `sx`/`ix`/`pal`) —
   из WLED. Её читают мобильные приложения.
 - `POST /json` принимает и «плоский» state, и обёртку `{"state":{...}}` —
@@ -314,7 +315,7 @@ pio run -e devkit_wroom32 -t upload      # прошивка
 pio run -e devkit_wroom32 -t uploadfs    # интерфейс на LittleFS
 ```
 
-`uploadfs` забывают чаще всего: без него на `lumen.local` откроется
+`uploadfs` забывают чаще всего: без него по адресу устройства откроется
 страница-заглушка вместо интерфейса.
 
 ### uploadfs стирает раздел целиком
@@ -326,9 +327,9 @@ pio run -e devkit_wroom32 -t uploadfs    # интерфейс на LittleFS
 устройству — предложи снять бэкап:**
 
 ```bash
-curl http://lumen.local/api/backup -o backup.json
+curl http://<IP>/api/backup -o backup.json
 # …uploadfs…
-curl -X POST http://lumen.local/api/backup \
+curl -X POST http://<IP>/api/backup \
      -H 'Content-Type: application/json' -d @backup.json
 ```
 
@@ -355,8 +356,9 @@ curl -X POST http://lumen.local/api/backup \
    после старта. Подключился к работающей плате — увидишь пустой экран.
    Нужен физический RESET при открытом мониторе.
 2. В `platformio.ini` стоит `CORE_DEBUG_LEVEL=2` (WARN), поэтому **все
-   `log_i` вырезаны компилятором**. Строк `Подключено: <ip>, RSSI`,
-   `mDNS: http://lumen.local`, `OTA доступно` в бинарнике физически нет.
+   `log_i` вырезаны компилятором**. Строк `Подключено: <ip>, RSSI`
+   и `OTA доступно` в бинарнике физически нет. Строка `IP: …` есть: она
+   печатается через `Serial.printf`.
 
 **Не отправляй пользователя искать в логе строку, которая собрана
 `log_i`** — сверься с уровнем прежде, чем называть конкретную строку.

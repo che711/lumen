@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <WiFi.h>
 
 #include "config.h"
 #include "core/scheduler_runner.h"
@@ -59,7 +60,9 @@ void setup() {
     g_online = lumen::netConnectOrProvision();
 
     if (g_online) {
-        lumen::discoveryBegin("lumen");
+        // mDNS нет, поэтому адрес — единственный способ найти устройство.
+        // Печатаем через Serial, а не log_i: log_i вырезан компилятором.
+        Serial.printf("IP: %s\n", WiFi.localIP().toString().c_str());
         lumen::webServerBegin();
         lumen::otaBegin("lumen");
         lumen::schedulerBegin();
@@ -89,6 +92,7 @@ void loop() {
     lumen::otaTick();
     lumen::schedulerTick(now);
     lumen::storeTick(now);
+    lumen::webTick(now);
 
     if (lumen::stateConsumeDirty()) {
         lumen::webBroadcastState();

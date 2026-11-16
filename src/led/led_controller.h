@@ -51,6 +51,10 @@ class LedController {
     std::vector<layout::Point> layout_;
     uint32_t           layoutVer_ = 0;
     Rgb*               scratch_   = nullptr;
+
+    // Предпросмотр: копия кадра (после яркости, до гаммы) для WebSocket.
+    uint8_t*           previewBuf_    = nullptr;
+    uint32_t           lastPreviewMs_ = 0;
     layout::OrderCache orders_[MAX_SEGMENTS];
 
     uint32_t lookFp_ = 0;
