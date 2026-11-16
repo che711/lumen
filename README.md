@@ -2,13 +2,14 @@
 
 Контроллер адресной ленты на ESP32 с декларативным планировщиком и
 собственным веб-интерфейсом. Говорит на JSON API, совместимом с WLED, —
-за счёт этого Home Assistant находит устройство сам, без custom_component
-и без YAML.
+за счёт этого Home Assistant работает с ним встроенной интеграцией WLED,
+без custom_component и без YAML. Устройство добавляется вручную по IP:
+автообнаружения (mDNS) нет.
 
 Собирается под две платы: **ESP32-C3 Super Mini** и **ESP32 DevKit (WROOM-32)**.
 
 Что внутри: 20 эффектов, 16 палитр, сегменты, пресеты, планировщик с
-солнечными якорями, сохранение состояния, mDNS-обнаружение, OTA, бэкап и
+солнечными якорями, сохранение состояния, OTA, бэкап и
 восстановление, мобильный интерфейс без единой внешней зависимости.
 
 В разработке: [конструктор раскладки](#конструктор-раскладки-в-разработке) —
@@ -35,7 +36,8 @@ pio device monitor
 
 При первом включении поднимается точка доступа `Lumen-XXXX`. Подключаетесь,
 открывается портал, вводите сеть и пароль. После перезапуска контроллер
-доступен как `http://lumen.local`.
+доступен по IP. Адрес виден в списке клиентов роутера (имя `Lumen`) и в
+мониторе порта: после баннера печатается строка `IP: …`.
 
 Портал можно и обойти, положив креды в `data/config.json` — тогда они
 уедут на устройство вместе с интерфейсом. Подробности и разбор типовых
@@ -420,7 +422,7 @@ pio run -e devkit_wroom32                  # 3. сборка, посмотрет
 pio run -e devkit_wroom32 -t upload        # 4. прошивка
 pio run -e devkit_wroom32 -t uploadfs      # 5. интерфейс + конфиг
 pio device monitor -e devkit_wroom32       # 6. монитор, затем RESET на плате
-curl -s http://lumen.local/json/info       # 7. проверка
+curl -s http://<IP>/json/info       # 7. проверка
 ```
 
 Шаги 4 и 5 независимы, порядок между ними любой.
@@ -470,9 +472,9 @@ to ESP32: Wrong boot mode detected`), — зажать **BOOT**, коротко 
 самого устройства:
 
 ```bash
-curl http://lumen.local/api/backup -o backup.json
+curl http://<IP>/api/backup -o backup.json
 # …uploadfs…
-curl -X POST http://lumen.local/api/backup \
+curl -X POST http://<IP>/api/backup \
      -H 'Content-Type: application/json' -d @backup.json
 ```
 
@@ -489,13 +491,14 @@ curl -X POST http://lumen.local/api/backup \
 
 ```
 Lumen 0.1.0 (wroom32)
+IP: 192.168.1.50
 Рендер вынесен на ядро 0
 ```
 
 **Дальше тишина, и это правильно.** В `platformio.ini` стоит
 `CORE_DEBUG_LEVEL=2` (WARN), поэтому все `log_i` вырезаны компилятором:
-строк `Подключено: <ip>, RSSI`, `mDNS: http://lumen.local` и `OTA доступно`
-в бинарнике физически нет. Работающее устройство молчит по построению.
+строк `Подключено: <ip>, RSSI` и `OTA доступно` в бинарнике физически нет.
+Строка `IP: …` остаётся: она печатается через `Serial.printf`. Работающее устройство молчит по построению.
 Нужен разговорчивый лог — соберите с `-D CORE_DEBUG_LEVEL=3`.
 
 Если после RESET по-прежнему пусто, дело почти всегда в DTR/RTS: на части
@@ -524,8 +527,9 @@ monitor_rts = 0
 роутера при этом будет показывать протухшую аренду, за которой уже никого
 нет, — по нему не диагностируйте.
 
-**`lumen.local` не резолвится**, а устройство в сети — mDNS проходит не
-через все роутеры и не в гостевых сетях. Работайте по IP.
+**Не знаете адрес устройства.** Смотрите список клиентов роутера (имя
+`Lumen`) или строку `IP: …` в мониторе порта после RESET. Адрес устройства
+отдаёт и `GET /json/info` (поле `ip`).
 
 ### Обновление по воздуху
 
@@ -533,7 +537,7 @@ monitor_rts = 0
 
 ```bash
 pio run -e devkit_wroom32 -t upload \
-        --upload-port lumen.local --upload-protocol espota
+        --upload-port <IP> --upload-protocol espota
 ```
 
 В `platformio.ini` этих параметров нет — передавайте флагами или заведите
@@ -544,7 +548,7 @@ pio run -e devkit_wroom32 -t upload \
 при каждом запуске. Задать пароль:
 
 ```bash
-curl -X POST http://lumen.local/api/config \
+curl -X POST http://<IP>/api/config \
      -H 'Content-Type: application/json' -d '{"apiPass":"ваш-пароль"}'
 ```
 
@@ -611,10 +615,11 @@ node_modules, ни CDN — на устройстве в локальной се�
 
 ## Home Assistant
 
-Настраивать не нужно ничего. Устройство анонсирует mDNS-сервис
-`_wled._tcp.local.` — именно его слушает встроенная интеграция WLED.
-Через минуту после включения HA покажет его в *Настройки → Устройства и
-службы* как обнаруженное.
+Автообнаружения нет: устройство не анонсирует себя по mDNS, поэтому Home
+Assistant сам его не найдёт. Добавьте вручную: *Настройки → Устройства и
+службы → Добавить интеграцию → WLED* и введите IP устройства. Роутеру стоит
+выдать этому адресу постоянную аренду, иначе после смены IP интеграцию
+придётся добавлять заново.
 
 Что важно знать про эту интеграцию:
 
@@ -677,7 +682,7 @@ node_modules, ни CDN — на устройстве в локальной се�
 Залить пример:
 
 ```bash
-curl -X POST http://lumen.local/api/schedule \
+curl -X POST http://<IP>/api/schedule \
      -H 'Content-Type: application/json' \
      -d @examples/schedule.example.json
 ```
@@ -900,9 +905,9 @@ Aurora, Ice, Candle, Autumn, Sakura, Neon, Deep.
   потому что эффект видит их как соседние номера.
 
 ```bash
-curl -X POST http://lumen.local/api/layout \
+curl -X POST http://<IP>/api/layout \
      -H 'Content-Type: application/json' -d @layout.json
-curl -X POST http://lumen.local/json/state \
+curl -X POST http://<IP>/json/state \
      -H 'Content-Type: application/json' \
      -d '{"seg":[{"id":0,"fx":4,"lmap":"x"}]}'
 ```
@@ -954,17 +959,17 @@ curl -X POST http://lumen.local/json/state \
 
 ```bash
 # включить радугу на полной скорости
-curl -X POST http://lumen.local/json/state \
+curl -X POST http://<IP>/json/state \
      -H 'Content-Type: application/json' \
      -d '{"on":true,"bri":200,"seg":[{"id":0,"fx":4,"sx":255,"pal":1}]}'
 
 # сохранить текущий свет как пресет 3
-curl -X POST http://lumen.local/json/state \
+curl -X POST http://<IP>/json/state \
      -H 'Content-Type: application/json' \
      -d '{"psave":3,"n":"Вечер"}'
 
 # применить пресет 3
-curl -X POST http://lumen.local/json/state \
+curl -X POST http://<IP>/json/state \
      -H 'Content-Type: application/json' -d '{"ps":3}'
 ```
 
@@ -992,7 +997,6 @@ src/
   led/effects.*           20 эффектов и 16 палитр
   led/led_controller.*    NeoPixelBus, сегменты, гамма-коррекция
   net/wifi_provision.*    подключение и captive-портал
-  net/discovery.*         mDNS `_wled._tcp`
   net/web_server.*        HTTP + WebSocket + весь API
   net/ota.*               обновление по воздуху
   store/store.*           config.json, schedule.json и layout.json на LittleFS
