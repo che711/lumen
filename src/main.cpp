@@ -60,9 +60,8 @@ void setup() {
     g_online = lumen::netConnectOrProvision();
 
     if (g_online) {
-        // mDNS нет, поэтому адрес — единственный способ найти устройство.
-        // Печатаем через Serial, а не log_i: log_i вырезан компилятором.
-        Serial.printf("IP: %s\n", WiFi.localIP().toString().c_str());
+        Serial.printf("\n\t\tIP-address: %s\n", WiFi.localIP().toString().c_str());
+        Serial.printf("\n");
         lumen::webServerBegin();
         lumen::otaBegin("lumen");
         lumen::schedulerBegin();
